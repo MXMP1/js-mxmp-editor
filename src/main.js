@@ -220,79 +220,113 @@ renderFilesList();
   const runBtn = document.getElementById("run-btn");
   const consoleOutput = document.getElementById("console-output");
 
-  if (runBtn && consoleOutput) {
-    runBtn.addEventListener("click", () => {
-      const codeToRun = view.state.doc.toString(); // Получаем текст из редактора
-      
-      // 1. Очищаем консоль перед новым запуском
-      consoleOutput.innerHTML = ""; 
+// --- УПРАВЛЕНИЕ ЗАПУСКОМ КОДА И КОНСОЛЬЮ ---
+const stopBtn = document.getElementById("stop-btn");
+const clearConsoleBtn = document.getElementById("clear-console-btn");
 
-      // 2. Сохраняем оригинальные методы консоли
-      const originalConsole = {
-        log: console.log,
-        warn: console.warn,
-        error: console.error,
-        info: console.info
-      };
+let currentWorker = null; // Переменная для хранения активного фонового потока
 
-      // Функция для создания красивой строки в нашей консоли
-      function createLogElement(type, args) {
-        originalConsole[type].apply(console, args); // Дублируем в F12
+// 1. Кнопка «Очистить консоль»
+if (clearConsoleBtn && consoleOutput) {
+  clearConsoleBtn.addEventListener("click", () => {
+    consoleOutput.innerHTML = "";
+  });
+}
 
-        const message = args.map(arg => {
-          if (typeof arg === 'object' && arg !== null) {
-            return JSON.stringify(arg, null, 2);
-          }
-          return String(arg);
-        }).join(' ');
+// 2. Функция для вывода логов на экран (мы её немного упростили, так как типы приходят из воркера)
+function printToScreenConsole(type, args) {
+  const message = args.map(arg => {
+    if (typeof arg === 'object' && arg !== null) return JSON.stringify(arg, null, 2);
+    return String(arg);
+  }).join(' ');
 
-        const logLine = document.createElement("div");
-        logLine.style.fontFamily = "monospace";
-        logLine.style.padding = "6px 0";
-        logLine.style.borderBottom = "1px solid #222";
-        logLine.style.whiteSpace = "pre-wrap";
-        logLine.textContent = `> ${message}`;
+  const logLine = document.createElement("div");
+  logLine.style.fontFamily = "monospace";
+  logLine.style.padding = "6px 0";
+  logLine.style.borderBottom = "1px solid #222";
+  logLine.style.whiteSpace = "pre-wrap";
+  logLine.textContent = `> ${message}`;
 
-        // Подсвечиваем цветом в зависимости от типа метода
-        if (type === 'warn') {
-          logLine.style.color = "#ffcb6b"; // Желтый для варнингов
-          logLine.style.backgroundColor = "rgba(255, 203, 107, 0.05)";
-        } else if (type === 'error') {
-          logLine.style.color = "#f07178"; // Красный для ошибок консоли
-          logLine.style.backgroundColor = "rgba(240, 113, 120, 0.05)";
-        } else if (type === 'info') {
-          logLine.style.color = "#82aaff"; // Синий для инфо
-        }
-
-        consoleOutput.appendChild(logLine);
-      }
-
-      // 3. Подменяем методы
-      console.log = (...args) => createLogElement('log', args);
-      console.warn = (...args) => createLogElement('warn', args);
-      console.error = (...args) => createLogElement('error', args);
-      console.info = (...args) => createLogElement('info', args);
-
-      // 4. Безопасно запускаем код пользователя
-      try {
-        eval(codeToRun); 
-      } catch (error) {
-        const errorLine = document.createElement("div");
-        errorLine.style.color = "#ff6b6b";
-        errorLine.style.fontFamily = "monospace";
-        errorLine.style.fontWeight = "bold";
-        errorLine.style.padding = "6px 0";
-        errorLine.textContent = `[Критическая ошибка выполнения]: ${error.message}`;
-        consoleOutput.appendChild(errorLine);
-      }
-
-      // 5. Возвращаем всё назад
-      console.log = originalConsole.log;
-      console.warn = originalConsole.warn;
-      console.error = originalConsole.error;
-      console.info = originalConsole.info;
-    });
+  if (type === 'warn') {
+    logLine.style.color = "#ffcb6b";
+    logLine.style.backgroundColor = "rgba(255, 203, 107, 0.05)";
+  } else if (type === 'error') {
+    logLine.style.color = "#f07178";
+    logLine.style.backgroundColor = "rgba(240, 113, 120, 0.05)";
+  } else if (type === 'info') {
+    logLine.style.color = "#82aaff";
   }
+
+  consoleOutput.appendChild(logLine);
+  consoleOutput.scrollTop = consoleOutput.scrollHeight; // Автоскролл консоли вниз
+}
+
+// 3. Функция остановки зависшего кода
+function stopExecution() {
+  if (currentWorker) {
+    currentWorker.terminate(); // Жестко убиваем фоновый поток с бесконечным циклом
+    currentWorker = null;
+    
+    printToScreenConsole('warn', ['Выполнение кода принудительно остановлено пользователем.']);
+    
+    // Меняем состояние кнопок назад
+    stopBtn.style.display = "none";
+    runBtn.textContent = "▶ Запустить код";
+  }
+}
+
+// Привязываем клик по кнопке «Стоп»
+if (stopBtn) {
+  stopBtn.addEventListener("click", stopExecution);
+}
+
+// 4. Логика кнопки «Запустить код» через Web Worker
+if (runBtn && consoleOutput) {
+  runBtn.addEventListener("click", () => {
+    // Если код уже запущен, повторный клик сработает как Стоп
+    if (currentWorker) {
+      stopExecution();
+      return;
+    }
+
+    const codeToRun = view.state.doc.toString();
+    consoleOutput.innerHTML = ""; // Очищаем консоль
+
+    // Показываем кнопку Стоп и меняем текст кнопки Запуск
+    stopBtn.style.display = "block";
+    runBtn.textContent = "⌛ Выполняется...";
+
+    // Инициализируем новый фоновый Worker через специальный синтаксис Vite
+    currentWorker = new Worker(new URL('./eval-worker.js', import.meta.url), { type: 'module' });
+
+    // Слушаем ответы от фонового потока
+    currentWorker.onmessage = function (e) {
+      const data = e.data;
+
+      if (data.type === 'console') {
+        // Если воркер прислал лог — выводим на экран
+        printToScreenConsole(data.method, data.args);
+      } 
+      else if (data.type === 'success') {
+        // Код успешно выполнился до конца
+        stopBtn.style.display = "none";
+        runBtn.textContent = "▶ Запустить код";
+        currentWorker = null;
+      } 
+      else if (data.type === 'error') {
+        // Произошла ошибка во время выполнения кода
+        printToScreenConsole('error', [`[Ошибка]: ${data.message}`]);
+        stopBtn.style.display = "none";
+        runBtn.textContent = "▶ Запустить код";
+        currentWorker = null;
+      }
+    };
+
+    // Запускаем код! Отправляем строку с кодом в воркер
+    currentWorker.postMessage({ code: codeToRun });
+  });
+}
+
 
   // --- ЛОГИКА ОКНА УДАЛЕНИЯ ---
 const deleteDialog = document.getElementById("delete-dialog");

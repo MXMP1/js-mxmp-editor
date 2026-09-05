@@ -13,9 +13,11 @@
   </head>
   <body>
     <div id="app">
-      <!-- Шапка -->
+      <!-- Шапка с кнопками Запуск и Стоп -->
       <div class="header-bar">
-        <button class="btn-run" id="run-btn">Запустить код</button>
+        <button class="btn-run" id="run-btn">▶ Запустить код</button>
+        <!-- Кнопка Стоп изначально заблокирована, пока код не запущен -->
+        <button class="btn-run" id="stop-btn" style="background: #a12323; flex: 0; width: 100px; display: none;">■ Стоп</button>
       </div>
 
       <!-- Основная рабочая область -->
@@ -34,10 +36,12 @@
 
       <!-- Консоль -->
       <div id="console-container">
-        <div class="console-title">Консоль вывода:</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+          <div class="console-title" style="margin: 0;">Консоль вывода:</div>
+          <button id="clear-console-btn" style="background: #2d2d2d; color: #aaa; border: 1px solid #444; padding: 2px 8px; font-size: 11px; cursor: pointer; border-radius: 4px;">Очистить</button>
+        </div>
         <div id="console-output"></div>
       </div>
-    </div>
 
         <!-- Модальное окно создания файла -->
     <dialog id="file-dialog" style="background: #252526; color: white; border: 1px solid #444; border-radius: 6px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); width: 280px;">
