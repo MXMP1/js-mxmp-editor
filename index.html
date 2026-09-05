@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JS Mobile Editor</title>
+
+      <script type="module" src="src/main.js" defer></script> 
+
+    <style>
+      /* Базовые стили, чтобы приложение было на весь экран */
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background-color: #1e1e1e;
+        color: #fff;
+        font-family: sans-serif;
+      }
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      #editor-container {
+        flex: 1; /* Редактор занимает верхнюю часть */
+        overflow: auto;
+      }
+      #console-container {
+        height: 30%; /* Консоль занимает нижние 30% */
+        border-top: 2px solid #333;
+        background: #151515;
+        padding: 10px;
+        box-sizing: border-box;
+        overflow-y: auto;
+      }
+      .btn-run {
+        padding: 10px;
+        background: #007acc;
+        color: white;
+        border: none;
+        cursor: pointer;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <button class="btn-run" id="run-btn">Запустить код</button>
+      <div id="editor-container"></div>
+      <div id="console-container">
+        <div style="color: #888; font-size: 12px;">Консоль вывода:</div>
+        <div id="console-output"></div>
+      </div>
+    </div>
+  </body>
+</html>
