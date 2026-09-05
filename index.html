@@ -23,11 +23,11 @@
         height: 100vh;
       }
       #editor-container {
-        flex: 1; /* Редактор занимает верхнюю часть */
+        height: 60vh; /* Редактор всегда занимает ровно 60% высоты экрана */
         overflow: auto;
       }
       #console-container {
-        height: 30%; /* Консоль занимает нижние 30% */
+        height: calc(40vh - 40px); /* Консоль занимает остаток экрана минус высота кнопки */
         border-top: 2px solid #333;
         background: #151515;
         padding: 10px;
