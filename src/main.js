@@ -121,23 +121,19 @@ function renderFilesList() {
     fileRow.appendChild(nameSpan);
 
     // Кнопка удаления файла (крестик)
-    if (fileName !== "main.js") { // Запретим удалять главный файл для безопасности
+    if (fileName !== "main.js") {
       const delBtn = document.createElement("span");
       delBtn.textContent = "×";
       delBtn.style.color = "#ff6b6b";
       delBtn.style.padding = "0 5px";
       delBtn.style.fontSize = "18px";
       delBtn.style.fontWeight = "bold";
+      
       delBtn.addEventListener("click", (e) => {
         e.stopPropagation(); // Чтобы не сработало переключение файла
-        if (confirm(`Удалить файл ${fileName}?`)) {
-          deleteFile(fileName);
-          if (currentFileName === fileName) {
-            switchFile("main.js");
-          } else {
-            renderFilesList();
-          }
-        }
+        
+        // Вызываем наше кастомное окно удаления
+        openDeleteDialog(fileName);
       });
       fileRow.appendChild(delBtn);
     }
@@ -165,10 +161,14 @@ const fileDialog = document.getElementById("file-dialog");
 const fileNameInput = document.getElementById("new-file-name-input");
 const dialogCancelBtn = document.getElementById("dialog-cancel-btn");
 const dialogSaveBtn = document.getElementById("dialog-save-btn");
+// Находим элемент текста ошибки в диалоге
+const dialogErrorMsg = document.getElementById("dialog-error-msg");
 
 // 1. Открытие окна при клике на "+ Новый файл"
 addFileBtn.addEventListener("click", () => {
   fileNameInput.value = ""; // Очищаем поле перед открытием
+  dialogErrorMsg.style.display = "none"; // Скрываем прошлую ошибку при новом открытии
+  dialogErrorMsg.textContent = "";
   fileDialog.showModal();   // Метод showModal() открывает окно как полноценный попап с затемнением заднего фона
   fileNameInput.focus();    // Сразу фокусируемся на инпуте (на ПК поднимет фокус, на мобилке может вызвать клавиатуру)
 });
@@ -182,9 +182,10 @@ dialogCancelBtn.addEventListener("click", () => {
 function handleCreateFile() {
   const nameWithoutExtension = fileNameInput.value.trim();
   
-  // Валидация на пустое поле
+  // Валидация на пустое поле через текст в попапе
   if (!nameWithoutExtension) {
-    alert("Имя файла не может быть пустым!"); // Пока оставим алерт, но его тоже можно заменить на красивую надпись в самом диалоге
+    dialogErrorMsg.textContent = "Имя файла не может быть пустым!";
+    dialogErrorMsg.style.display = "block";
     return;
   }
 
@@ -195,7 +196,9 @@ function handleCreateFile() {
     switchFile(fullFileName);
     fileDialog.close(); // Закрываем окно после успешного создания
   } else {
-    alert("Файл с таким именем уже существует!");
+    // Валидация на дубликат через текст в попапе
+    dialogErrorMsg.textContent = "Файл с таким именем уже существует!";
+    dialogErrorMsg.style.display = "block";
   }
 }
 
@@ -290,3 +293,41 @@ renderFilesList();
       console.info = originalConsole.info;
     });
   }
+
+  // --- ЛОГИКА ОКНА УДАЛЕНИЯ ---
+const deleteDialog = document.getElementById("delete-dialog");
+const deleteDialogText = document.getElementById("delete-dialog-text");
+const deleteCancelBtn = document.getElementById("delete-cancel-btn");
+const deleteConfirmBtn = document.getElementById("delete-confirm-btn");
+
+let fileToDelete = ""; // Переменная для хранения имени файла, выбранного для удаления
+
+// Функция открытия окна удаления
+function openDeleteDialog(fileName) {
+  fileToDelete = fileName;
+  deleteDialogText.textContent = `Вы действительно хотите удалить файл ${fileName}? Восстановить его будет невозможно.`;
+  deleteDialog.showModal();
+}
+
+// Клик по кнопке "Отмена" в окне удаления
+deleteCancelBtn.addEventListener("click", () => {
+  deleteDialog.close();
+  fileToDelete = ""; // Очищаем ссылку
+});
+
+// Клик по кнопке "Удалить" (финальное удаление)
+deleteConfirmBtn.addEventListener("click", () => {
+  if (fileToDelete) {
+    deleteFile(fileToDelete);
+    
+    // Если мы удалили тот файл, который прямо сейчас открыт — переключаем на main.js
+    if (currentFileName === fileToDelete) {
+      switchFile("main.js");
+    } else {
+      renderFilesList(); // Иначе просто обновляем список в сайдбаре
+    }
+    
+    deleteDialog.close();
+    fileToDelete = "";
+  }
+});
