@@ -5,9 +5,7 @@ import { defaultKeymap } from "@codemirror/commands";
 import { javascript } from "@codemirror/lang-javascript";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { scopeCompletionSource } from "@codemirror/lang-javascript";
-
-// Начальный код в редакторе
-const initialCode = `// Твой первый JS код на телефоне!\nconsole.log("Привет, мир!");\n`;
+import { getAllFiles, saveFileContent, createNewFile, deleteFile } from "./storage.js";
 
 // 1. Создаем мощный кастомный источник подсказок для глобальной области видимости
 function customGlobalCompletions(context) {
@@ -49,6 +47,21 @@ const customTheme = EditorView.theme({
   }
 });
 
+// Переменная для отслеживания текущего открытого файла
+let currentFileName = "main.js";
+
+// Берем файлы из локального хранилища
+const allFiles = getAllFiles();
+const initialCode = allFiles[currentFileName] || "// Пустой файл\n";
+
+// Функция, которая срабатывает при ЛЮБОМ изменении текста в редакторе (Автосохранение!)
+const autoSaveExtension = EditorView.updateListener.of((update) => {
+  if (update.docChanged) {
+    const currentDocText = update.state.doc.toString();
+    saveFileContent(currentFileName, currentDocText);
+  }
+});
+
 // Создаем состояние редактора с плагинами
 const state = EditorState.create({
   doc: initialCode,
@@ -63,7 +76,8 @@ const state = EditorState.create({
       override: [customGlobalCompletions] 
     }), // Включаем автодополнение (работает на лету!)
     keymap.of(defaultKeymap), // Стандартные горячие клавиши
-    EditorView.lineWrapping   // Автоперенос длинных строк (важно для мобилок)
+    EditorView.lineWrapping,   // Автоперенос длинных строк (важно для мобилок)
+    autoSaveExtension // Подключаем наше автосохранение!
   ],
 });
 
@@ -72,6 +86,132 @@ const view = new EditorView({
   state,
   parent: document.getElementById("editor-container"),
 });
+
+// --- ЛОГИКА ИНТЕРФЕЙСА ФАЙЛОВ ---
+
+const filesListContainer = document.getElementById("files-list");
+const addFileBtn = document.getElementById("add-file-btn");
+
+// Функция для рендеринга списка файлов в сайдбаре
+function renderFilesList() {
+  filesListContainer.innerHTML = "";
+  const files = getAllFiles();
+
+  Object.keys(files).forEach(fileName => {
+    const fileRow = document.createElement("div");
+    fileRow.style.display = "flex";
+    fileRow.style.justifyContent = "space-between";
+    fileRow.style.alignItems = "center";
+    fileRow.style.padding = "8px 10px";
+    fileRow.style.cursor = "pointer";
+    fileRow.style.borderBottom = "1px solid #333";
+    fileRow.style.fontSize = "14px";
+    
+    // Подсвечиваем активный файл
+    if (fileName === currentFileName) {
+      fileRow.style.background = "#37373d";
+      fileRow.style.fontWeight = "bold";
+    }
+
+    // Название файла (клик по нему переключает файл)
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = fileName;
+    nameSpan.style.flex = "1";
+    nameSpan.addEventListener("click", () => switchFile(fileName));
+    fileRow.appendChild(nameSpan);
+
+    // Кнопка удаления файла (крестик)
+    if (fileName !== "main.js") { // Запретим удалять главный файл для безопасности
+      const delBtn = document.createElement("span");
+      delBtn.textContent = "×";
+      delBtn.style.color = "#ff6b6b";
+      delBtn.style.padding = "0 5px";
+      delBtn.style.fontSize = "18px";
+      delBtn.style.fontWeight = "bold";
+      delBtn.addEventListener("click", (e) => {
+        e.stopPropagation(); // Чтобы не сработало переключение файла
+        if (confirm(`Удалить файл ${fileName}?`)) {
+          deleteFile(fileName);
+          if (currentFileName === fileName) {
+            switchFile("main.js");
+          } else {
+            renderFilesList();
+          }
+        }
+      });
+      fileRow.appendChild(delBtn);
+    }
+
+    filesListContainer.appendChild(fileRow);
+  });
+}
+
+// Функция переключения между файлами
+function switchFile(fileName) {
+  currentFileName = fileName;
+  const files = getAllFiles();
+  const fileContent = files[fileName] || "";
+
+  // Обновляем текст внутри редактора безопасным путем через dispatch
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: fileContent }
+  });
+
+  renderFilesList();
+}
+
+// Находим новые элементы диалогового окна
+const fileDialog = document.getElementById("file-dialog");
+const fileNameInput = document.getElementById("new-file-name-input");
+const dialogCancelBtn = document.getElementById("dialog-cancel-btn");
+const dialogSaveBtn = document.getElementById("dialog-save-btn");
+
+// 1. Открытие окна при клике на "+ Новый файл"
+addFileBtn.addEventListener("click", () => {
+  fileNameInput.value = ""; // Очищаем поле перед открытием
+  fileDialog.showModal();   // Метод showModal() открывает окно как полноценный попап с затемнением заднего фона
+  fileNameInput.focus();    // Сразу фокусируемся на инпуте (на ПК поднимет фокус, на мобилке может вызвать клавиатуру)
+});
+
+// 2. Закрытие окна при клике на "Отмена"
+dialogCancelBtn.addEventListener("click", () => {
+  fileDialog.close();       // Закрываем окно
+});
+
+// 3. Логика сохранения файла по кнопке "Создать"
+function handleCreateFile() {
+  const nameWithoutExtension = fileNameInput.value.trim();
+  
+  // Валидация на пустое поле
+  if (!nameWithoutExtension) {
+    alert("Имя файла не может быть пустым!"); // Пока оставим алерт, но его тоже можно заменить на красивую надпись в самом диалоге
+    return;
+  }
+
+  // Автоматически приклеиваем .js к введённому имени
+  const fullFileName = `${nameWithoutExtension}.js`;
+
+  if (createNewFile(fullFileName)) {
+    switchFile(fullFileName);
+    fileDialog.close(); // Закрываем окно после успешного создания
+  } else {
+    alert("Файл с таким именем уже существует!");
+  }
+}
+
+// Срабатывает при клике на синюю кнопку в попапе
+dialogSaveBtn.addEventListener("click", handleCreateFile);
+
+// Удобство: создание файла по нажатию клавиши Enter внутри инпута
+fileNameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+     e.preventDefault();
+    handleCreateFile();
+  }
+});
+
+// Инициализируем список файлов при первой загрузке приложения
+renderFilesList();
 
  // Логика кнопки "Запустить код" с перехватом консоли
   const runBtn = document.getElementById("run-btn");
