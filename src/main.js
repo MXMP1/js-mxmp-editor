@@ -1,39 +1,48 @@
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { autocompletion } from "@codemirror/autocomplete";
-import { defaultKeymap } from "@codemirror/commands";
+import { defaultKeymap, indentMore, indentLess } from "@codemirror/commands";
 import { javascript } from "@codemirror/lang-javascript";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { scopeCompletionSource } from "@codemirror/lang-javascript";
 import { getAllFiles, saveFileContent, createNewFile, deleteFile } from "./storage.js";
 
-// 1. Создаем мощный кастомный источник подсказок для глобальной области видимости
-function customGlobalCompletions(context) {
-  // Находим слово, которое сейчас вводится
+// 1. Объединённый источник подсказок: JS-анализатор + глобальные объекты
+async function combinedCompletions(context) {
   let word = context.matchBefore(/\w*/);
-  
-  // Если ввода нет или мы внутри строки/комментария — ничего не предлагаем
   if (!word || (word.from == word.to && !context.explicit)) return null;
 
-  // Собираем список всех глобальных штук (console, setTimeout, Math, Array и т.д.)
-  const options = Object.getOwnPropertyNames(globalThis)
-    .filter(name => /^[a-zA-Z_]\w*$/.test(name)) // Берем только валидные имена переменных
-    .map(name => {
-      // Пытаемся определить тип для красивой иконки в меню подсказок
-      let type = "variable";
-      try {
-        if (typeof globalThis[name] === "function") type = "function";
-        if (typeof globalThis[name] === "object" && globalThis[name] !== null) type = "namespace";
-      } catch(e) {}
-      
-      return { label: name, type: type };
-    });
+  const from = word.from;
+  const seen = new Set();
+  const options = [];
 
-  return {
-    from: word.from,
-    options: options,
-    validFor: /^\w*$/
-  };
+  // 1a. Получаем подсказки от JavaScript-анализатора (свойства объектов, переменные в области видимости)
+  try {
+    const jsResult = await scopeCompletionSource(context);
+    if (jsResult && jsResult.options) {
+      jsResult.options.forEach(opt => { seen.add(opt.label); });
+      options.push(...jsResult.options);
+    }
+  } catch (e) {}
+
+  // 1b. Добавляем глобальные объекты, которых ещё нет в списке
+  const globalNames = Object.getOwnPropertyNames(globalThis);
+  for (let i = 0; i < globalNames.length; i++) {
+    const name = globalNames[i];
+    if (!/^[a-zA-Z_]\w*$/.test(name)) continue;
+    if (seen.has(name)) continue;
+
+    let type = "variable";
+    try {
+      if (typeof globalThis[name] === "function") type = "function";
+      if (typeof globalThis[name] === "object" && globalThis[name] !== null) type = "namespace";
+    } catch (e) {}
+
+    options.push({ label: name, type });
+    seen.add(name);
+  }
+
+  return { from, options, validFor: /^\w*$/ };
 }
 
 // Кастомная тема для настройки высоты и шрифта редактора
@@ -72,10 +81,14 @@ const state = EditorState.create({
     customTheme,          // Применяем наши стили шрифта
     autocompletion({ 
       defaultKeymap: true,
-                          // Закидываем наш кастомный источник в массив override
-      override: [customGlobalCompletions] 
-    }), // Включаем автодополнение (работает на лету!)
+      override: [combinedCompletions] 
+    }), // Включаем автодополнение с объединёнными подсказками
     keymap.of(defaultKeymap), // Стандартные горячие клавиши
+    // Tab всегда делает отступ внутри редактора (не уводит фокус на кнопки)
+    keymap.of([
+      { key: "Tab", run: indentMore },
+      { key: "Shift-Tab", run: indentLess }
+    ]),
     EditorView.lineWrapping,   // Автоперенос длинных строк (важно для мобилок)
     autoSaveExtension // Подключаем наше автосохранение!
   ],
@@ -99,35 +112,25 @@ function renderFilesList() {
 
   Object.keys(files).forEach(fileName => {
     const fileRow = document.createElement("div");
-    fileRow.style.display = "flex";
-    fileRow.style.justifyContent = "space-between";
-    fileRow.style.alignItems = "center";
-    fileRow.style.padding = "8px 10px";
-    fileRow.style.cursor = "pointer";
-    fileRow.style.borderBottom = "1px solid #333";
-    fileRow.style.fontSize = "14px";
+    fileRow.className = "file-row";
     
     // Подсвечиваем активный файл
     if (fileName === currentFileName) {
-      fileRow.style.background = "#37373d";
-      fileRow.style.fontWeight = "bold";
+      fileRow.classList.add("file-row--active");
     }
 
     // Название файла (клик по нему переключает файл)
     const nameSpan = document.createElement("span");
+    nameSpan.className = "file-name";
     nameSpan.textContent = fileName;
-    nameSpan.style.flex = "1";
     nameSpan.addEventListener("click", () => switchFile(fileName));
     fileRow.appendChild(nameSpan);
 
     // Кнопка удаления файла (крестик)
     if (fileName !== "main.js") {
       const delBtn = document.createElement("span");
+      delBtn.className = "file-delete-btn";
       delBtn.textContent = "×";
-      delBtn.style.color = "#ff6b6b";
-      delBtn.style.padding = "0 5px";
-      delBtn.style.fontSize = "18px";
-      delBtn.style.fontWeight = "bold";
       
       delBtn.addEventListener("click", (e) => {
         e.stopPropagation(); // Чтобы не сработало переключение файла
@@ -241,20 +244,15 @@ function printToScreenConsole(type, args) {
   }).join(' ');
 
   const logLine = document.createElement("div");
-  logLine.style.fontFamily = "monospace";
-  logLine.style.padding = "6px 0";
-  logLine.style.borderBottom = "1px solid #222";
-  logLine.style.whiteSpace = "pre-wrap";
+  logLine.className = "log-line";
   logLine.textContent = `> ${message}`;
 
   if (type === 'warn') {
-    logLine.style.color = "#ffcb6b";
-    logLine.style.backgroundColor = "rgba(255, 203, 107, 0.05)";
+    logLine.classList.add("log-line--warn");
   } else if (type === 'error') {
-    logLine.style.color = "#f07178";
-    logLine.style.backgroundColor = "rgba(240, 113, 120, 0.05)";
+    logLine.classList.add("log-line--error");
   } else if (type === 'info') {
-    logLine.style.color = "#82aaff";
+    logLine.classList.add("log-line--info");
   }
 
   consoleOutput.appendChild(logLine);
@@ -308,7 +306,7 @@ if (runBtn && consoleOutput) {
         printToScreenConsole(data.method, data.args);
       } 
       else if (data.type === 'success') {
-        // Код успешно выполнился до конца
+        // Код выполнился (воркер сам закрылся, т.к. нет активных таймеров)
         stopBtn.style.display = "none";
         runBtn.textContent = "▶ Запустить код";
         currentWorker = null;

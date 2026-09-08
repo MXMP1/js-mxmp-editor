@@ -37,6 +37,18 @@ html, body {
   background: #0062a3;
 }
 
+/* Кнопка Стоп */
+#stop-btn {
+  background: #a12323;
+  flex: 0;
+  width: 100px;
+  display: none;
+}
+
+#stop-btn:hover {
+  background: #7f1b1b;
+}
+
 /* Главная рабочая область */
 .main-layout {
   display: flex; 
@@ -100,12 +112,208 @@ html, body {
   overflow-y: auto;
 }
 
+/* Заголовок консоли с кнопкой очистки */
+.console-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
 .console-title {
   color: #888; 
   font-size: 12px; 
-  margin-bottom: 5px;
+  margin: 0;
   text-transform: uppercase;
   font-weight: bold;
+}
+
+/* Кнопка очистки консоли */
+#clear-console-btn {
+  background: #2d2d2d;
+  color: #aaa;
+  border: 1px solid #444;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+#clear-console-btn:hover {
+  background: #3d3d3d;
+  color: #fff;
+}
+
+/* ==========================================================================
+   ДИАЛОГОВЫЕ ОКНА
+   ========================================================================== */
+.dialog {
+  background: #252526;
+  color: white;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 20px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+  width: 280px;
+}
+
+.dialog-title {
+  font-weight: bold;
+  margin-bottom: 12px;
+  font-size: 15px;
+}
+
+.dialog-title--danger {
+  color: #ff6b6b;
+}
+
+/* Контейнер инпута с прижатым .js */
+.file-input-wrapper {
+  display: flex;
+  align-items: center;
+  background: #3c3c3c;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-bottom: 15px;
+}
+
+.file-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: white;
+  outline: none;
+  font-size: 15px;
+}
+
+.file-extension {
+  color: #888;
+  font-family: monospace;
+  font-size: 15px;
+  user-select: none;
+}
+
+/* Блок ошибки в диалоге */
+.dialog-error-msg {
+  color: #ff6b6b;
+  font-size: 13px;
+  margin-bottom: 12px;
+  display: none;
+  font-weight: 500;
+}
+
+/* Контейнер кнопок в диалоге */
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.dialog-btn {
+  padding: 6px 12px;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 13px;
+}
+
+.dialog-btn--cancel {
+  background: transparent;
+  color: #aaa;
+}
+
+.dialog-btn--cancel:hover {
+  color: #fff;
+}
+
+.dialog-btn--save {
+  background: #007acc;
+  color: white;
+}
+
+.dialog-btn--save:hover {
+  background: #0098ff;
+}
+
+.dialog-btn--danger {
+  background: #ff6b6b;
+  color: white;
+}
+
+.dialog-btn--danger:hover {
+  background: #ff4444;
+}
+
+/* Текст подтверждения удаления */
+.delete-dialog-text {
+  font-size: 14px;
+  color: #ccc;
+  margin-bottom: 20px;
+  line-height: 1.4;
+}
+
+/* ==========================================================================
+   ЭЛЕМЕНТЫ СПИСКА ФАЙЛОВ В САЙДБАРЕ
+   ========================================================================== */
+.file-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid #333;
+  font-size: 14px;
+}
+
+.file-row:hover {
+  background: #2d2d2d;
+}
+
+.file-row--active {
+  background: #37373d;
+  font-weight: bold;
+}
+
+.file-name {
+  flex: 1;
+}
+
+.file-delete-btn {
+  color: #ff6b6b;
+  padding: 0 5px;
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.file-delete-btn:hover {
+  color: #ff4444;
+}
+
+/* ==========================================================================
+   СТРОКИ КОНСОЛИ
+   ========================================================================== */
+.log-line {
+  font-family: monospace;
+  padding: 6px 0;
+  border-bottom: 1px solid #222;
+  white-space: pre-wrap;
+}
+
+.log-line--warn {
+  color: #ffcb6b;
+  background-color: rgba(255, 203, 107, 0.05);
+}
+
+.log-line--error {
+  color: #f07178;
+  background-color: rgba(240, 113, 120, 0.05);
+}
+
+.log-line--info {
+  color: #82aaff;
 }
 
 
