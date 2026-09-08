@@ -1,75 +1,225 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="vscode-dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>JS Mobile Editor</title>
-    
-    <!-- Подключаем наш новый файл стилей. Vite сам его обработает -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta
+      name="description"
+      content="JS MXMP Editor — быстрый мобильный редактор и песочница для JavaScript-кода прямо в браузере."
+    />
+    <meta name="theme-color" content="#1e1e1e" />
+
+    <!-- PWA / мобильные мета-теги -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MXMP Editor" />
+
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="mask-icon" href="/icon.svg" color="#8b3bff" />
+
+    <title>JS MXMP Editor</title>
+
+    <!-- Подключаем наш файл стилей. Vite сам его обработает -->
     <link rel="stylesheet" href="./src/style.css" />
-    
+
     <!-- Подключение скрипта логики -->
-    <script type="module" src="src/main.js" defer></script> 
+    <script type="module" src="src/main.js" defer></script>
   </head>
   <body>
     <div id="app">
-      <!-- Шапка с кнопками Запуск и Стоп -->
-      <div class="header-bar">
-        <button class="btn-run" id="run-btn">▶ Запустить код</button>
-        <!-- Кнопка Стоп изначально заблокирована, пока код не запущен -->
-        <button class="btn-run" id="stop-btn">■ Стоп</button>
-      </div>
+      <!-- ===================== ВЕРХНЯЯ ПАНЕЛЬ ===================== -->
+      <header class="topbar">
+        <button type="button" class="icon-btn" id="menu-btn" aria-label="Список файлов">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
 
-      <!-- Основная рабочая область -->
-      <div class="main-layout">
-        
-        <!-- Сайдбар -->
-        <div id="sidebar">
-          <div class="sidebar-title">Файлы</div>
-          <button id="add-file-btn">+ Новый файл</button>
-          <div id="files-list"></div>
+        <div class="topbar-center">
+          <span class="topbar-logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M13 2 L4.5 13.5 H11 L9.5 22 L19 10 H12.5 Z" />
+            </svg>
+          </span>
+          <span class="topbar-file" id="current-file-name">main.js</span>
         </div>
 
-        <!-- Редактор кода -->
-        <div id="editor-container"></div>
-      </div>
+        <button type="button" class="icon-btn" id="settings-btn" aria-label="Настройки">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3.2" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
+      </header>
 
-      <!-- Консоль -->
-      <div id="console-container">
-        <div class="console-header">
-          <div class="console-title">Консоль вывода:</div>
-          <button id="clear-console-btn">Очистить</button>
+      <!-- ===================== РАБОЧАЯ ОБЛАСТЬ ===================== -->
+      <div class="workspace">
+        <!-- Сайдбар со списком файлов (на мобильном — выдвижной ящик) -->
+        <aside id="sidebar" class="sidebar" aria-label="Файлы проекта">
+          <div class="sidebar-header">
+            <span class="sidebar-title">Файлы</span>
+            <button type="button" id="add-file-btn" class="btn btn--add" aria-label="Создать новый файл">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              <span>Новый файл</span>
+            </button>
+          </div>
+          <div id="files-list" class="files-list"></div>
+        </aside>
+
+        <!-- Затемнение под выдвижным ящиком (только мобильные) -->
+        <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+        <!-- Колонка: редактор + консоль -->
+        <div class="main-col" id="main-col">
+          <section class="editor-pane">
+            <div id="editor-container" class="editor-container"></div>
+          </section>
+
+          <!-- Консоль вывода (на мобильном — нижняя шторка) -->
+          <section class="console-pane" id="console-pane">
+            <div class="console-handle" id="console-handle" title="Потяните, чтобы изменить размер">
+              <span class="grabber"></span>
+            </div>
+            <div class="console-header">
+              <span class="console-title">Консоль</span>
+              <div class="console-actions">
+                <button type="button" id="clear-console-btn" class="btn btn--ghost">Очистить</button>
+                <button type="button" id="console-close-btn" class="icon-btn icon-btn--sm" aria-label="Скрыть консоль">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div id="console-output" class="console-output"></div>
+          </section>
         </div>
-        <div id="console-output"></div>
       </div>
 
-        <!-- Модальное окно создания файла -->
-    <dialog id="file-dialog" class="dialog">
-      <div class="dialog-title">Создать новый файл</div>
-      
-      <!-- Контейнер инпута с прижатым .js -->
-      <div class="file-input-wrapper">
-        <input type="text" id="new-file-name-input" class="file-input" placeholder="Имя файла" />
-        <span class="file-extension">.js</span>
+      <!-- ============ ПАНЕЛЬ БЫСТРЫХ СИМВОЛОВ (для телефона) ============ -->
+      <div class="extra-keys" id="extra-keys" aria-label="Быстрые символы">
+        <button type="button" data-key="tab" title="Отступ">⇥</button>
+        <button type="button" data-pair="{}" title="Фигурные скобки">{}</button>
+        <button type="button" data-pair="()" title="Круглые скобки">()</button>
+        <button type="button" data-pair="[]" title="Квадратные скобки">[]</button>
+        <button type="button" data-pair='""' title="Двойные кавычки">""</button>
+        <button type="button" data-pair="''" title="Одинарные кавычки">''</button>
+        <button type="button" data-pair="``" title="Шаблонная строка">``</button>
+        <button type="button" data-insert=";" title="Точка с запятой">;</button>
+        <button type="button" data-insert=":" title="Двоеточие">:</button>
+        <button type="button" data-insert="=" title="Равно">=</button>
+        <button type="button" data-insert="=&gt;" title="Стрелочная функция">=&gt;</button>
+        <button type="button" data-insert="." title="Точка">.</button>
+        <button type="button" data-insert="," title="Запятая">,</button>
+        <button type="button" data-insert="/" title="Слэш">/</button>
+        <button type="button" data-insert="&lt;" title="Меньше">&lt;</button>
+        <button type="button" data-insert="&gt;" title="Больше">&gt;</button>
+        <button type="button" data-insert="+" title="Плюс">+</button>
+        <button type="button" data-insert="-" title="Минус">-</button>
+        <button type="button" data-insert="*" title="Умножение">*</button>
+        <button type="button" data-insert="?" title="Вопрос / тернарный оператор">?</button>
+        <button type="button" data-insert="_" title="Подчёркивание">_</button>
+        <button type="button" data-insert="&amp;" title="Амперсанд">&amp;</button>
+        <button type="button" data-insert="|" title="Или">|</button>
+        <button type="button" data-insert="!" title="Отрицание">!</button>
       </div>
 
-      <!-- Сюда мы будем выводить ошибки -->
-      <div id="dialog-error-msg" class="dialog-error-msg"></div>
+      <!-- ===================== НИЖНЯЯ ПАНЕЛЬ ДЕЙСТВИЙ ===================== -->
+      <footer class="actionbar">
+        <button type="button" class="btn btn--run" id="run-btn">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+          <span id="run-btn-label">Запустить</span>
+        </button>
 
-      <!-- Кнопки управления -->
-      <div class="dialog-actions">
-        <button id="dialog-cancel-btn" class="dialog-btn dialog-btn--cancel">Отмена</button>
-        <button id="dialog-save-btn" class="dialog-btn dialog-btn--save">Создать</button>
-      </div>
-    </dialog>
-    <dialog id="delete-dialog" class="dialog" style="width: 260px;">
-      <div class="dialog-title dialog-title--danger">Удалить файл?</div>
-      <div id="delete-dialog-text" class="delete-dialog-text">Вы уверены, что хотите удалить этот файл?</div>
-      
-      <div class="dialog-actions">
-        <button id="delete-cancel-btn" class="dialog-btn dialog-btn--cancel">Отмена</button>
-        <button id="delete-confirm-btn" class="dialog-btn dialog-btn--danger">Удалить</button>
-      </div>
-    </dialog>
+        <button type="button" class="btn btn--stop is-hidden" id="stop-btn">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+          </svg>
+          <span>Стоп</span>
+        </button>
+
+        <button type="button" class="btn btn--console" id="console-toggle-btn" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+          <span>Консоль</span>
+          <span class="badge is-hidden" id="console-badge">0</span>
+        </button>
+      </footer>
+
+      <!-- ===================== ДИАЛОГ: СОЗДАНИЕ ФАЙЛА ===================== -->
+      <dialog id="file-dialog" class="dialog">
+        <div class="dialog-title">Создать новый файл</div>
+
+        <div class="file-input-wrapper">
+          <input type="text" id="new-file-name-input" class="file-input" placeholder="Имя файла" autocomplete="off" />
+          <span class="file-extension">.js</span>
+        </div>
+
+        <div id="dialog-error-msg" class="dialog-error-msg"></div>
+
+        <div class="dialog-actions">
+          <button type="button" id="dialog-cancel-btn" class="dialog-btn dialog-btn--cancel">Отмена</button>
+          <button type="button" id="dialog-save-btn" class="dialog-btn dialog-btn--save">Создать</button>
+        </div>
+      </dialog>
+
+      <!-- ===================== ДИАЛОГ: УДАЛЕНИЕ ФАЙЛА ===================== -->
+      <dialog id="delete-dialog" class="dialog dialog--sm">
+        <div class="dialog-title dialog-title--danger">Удалить файл?</div>
+        <div id="delete-dialog-text" class="delete-dialog-text">Вы уверены, что хотите удалить этот файл?</div>
+
+        <div class="dialog-actions">
+          <button type="button" id="delete-cancel-btn" class="dialog-btn dialog-btn--cancel">Отмена</button>
+          <button type="button" id="delete-confirm-btn" class="dialog-btn dialog-btn--danger">Удалить</button>
+        </div>
+      </dialog>
+
+      <!-- ===================== ДИАЛОГ: НАСТРОЙКИ ===================== -->
+      <dialog id="settings-dialog" class="dialog dialog--settings">
+        <div class="dialog-title">Настройки</div>
+
+        <div class="settings-group">
+          <span class="settings-label">Тема оформления</span>
+          <div class="segmented" id="theme-segmented" role="group" aria-label="Выбор темы">
+            <button type="button" class="segmented-btn" data-theme-value="vscode-dark">VS Code Dark</button>
+            <button type="button" class="segmented-btn" data-theme-value="fresh-modern">Fresh Modern</button>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <span class="settings-label">Размер шрифта редактора</span>
+          <div class="stepper">
+            <button type="button" id="font-decrease" class="stepper-btn" aria-label="Уменьшить шрифт">A−</button>
+            <span id="font-size-value" class="stepper-value">16px</span>
+            <button type="button" id="font-increase" class="stepper-btn" aria-label="Увеличить шрифт">A+</button>
+          </div>
+        </div>
+
+        <div class="settings-group settings-group--row">
+          <span class="settings-label">Панель быстрых символов</span>
+          <button type="button" id="extrakeys-toggle" class="switch" role="switch" aria-checked="true" aria-label="Показывать панель быстрых символов">
+            <span class="switch-thumb"></span>
+          </button>
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" id="settings-close-btn" class="dialog-btn dialog-btn--save">Готово</button>
+        </div>
+      </dialog>
+    </div>
   </body>
 </html>

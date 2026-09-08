@@ -1,13 +1,14 @@
-import { EditorState } from "@codemirror/state";
+import { EditorState, Compartment } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { autocompletion } from "@codemirror/autocomplete";
 import { defaultKeymap, indentMore, indentLess } from "@codemirror/commands";
-import { javascript } from "@codemirror/lang-javascript";
+import { javascript, scopeCompletionSource } from "@codemirror/lang-javascript";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { scopeCompletionSource } from "@codemirror/lang-javascript";
 import { getAllFiles, saveFileContent, createNewFile, deleteFile } from "./storage.js";
 
-// 1. Объединённый источник подсказок: JS-анализатор + глобальные объекты
+// ==========================================================================
+// 1. АВТОДОПОЛНЕНИЕ: JS-анализатор + глобальные объекты
+// ==========================================================================
 async function combinedCompletions(context) {
   let word = context.matchBefore(/\w*/);
   if (!word || (word.from == word.to && !context.explicit)) return null;
@@ -16,16 +17,16 @@ async function combinedCompletions(context) {
   const seen = new Set();
   const options = [];
 
-  // 1a. Получаем подсказки от JavaScript-анализатора (свойства объектов, переменные в области видимости)
+  // 1a. Подсказки от JavaScript-анализатора (свойства объектов, переменные в области видимости)
   try {
     const jsResult = await scopeCompletionSource(context);
     if (jsResult && jsResult.options) {
-      jsResult.options.forEach(opt => { seen.add(opt.label); });
+      jsResult.options.forEach((opt) => seen.add(opt.label));
       options.push(...jsResult.options);
     }
   } catch (e) {}
 
-  // 1b. Добавляем глобальные объекты, которых ещё нет в списке
+  // 1b. Глобальные объекты, которых ещё нет в списке
   const globalNames = Object.getOwnPropertyNames(globalThis);
   for (let i = 0; i < globalNames.length; i++) {
     const name = globalNames[i];
@@ -45,97 +46,214 @@ async function combinedCompletions(context) {
   return { from, options, validFor: /^\w*$/ };
 }
 
-// Кастомная тема для настройки высоты и шрифта редактора
-const customTheme = EditorView.theme({
-  "&": {
-    fontSize: "16px", // Идеальный размер для мобильных экранов, чтобы браузер не зумил при фокусе
-    height: "100%"
-  },
-  ".cm-scroller": {
-    fontFamily: "JetBrains Mono, Fira Code, monospace", // Красивый моноширинный шрифт
-  }
+// ==========================================================================
+// 2. ТЕМЫ РЕДАКТОРА (CodeMirror)
+// ==========================================================================
+// Базовая тема: размер шрифта берём из CSS-переменной, чтобы менять его на лету
+const editorFontTheme = EditorView.theme({
+  "&": { fontSize: "var(--editor-font-size, 16px)", height: "100%" },
+  ".cm-scroller": { fontFamily: "var(--font-mono)", lineHeight: "1.55" },
 });
 
-// Переменная для отслеживания текущего открытого файла
-let currentFileName = "main.js";
+// Поверх One Dark перекрашиваем "хром" редактора под тему Fresh Modern
+const freshEditorTheme = EditorView.theme(
+  {
+    "&": { backgroundColor: "#12151f" },
+    ".cm-gutters": { backgroundColor: "#12151f", color: "#4b5364", border: "none" },
+    ".cm-activeLine": { backgroundColor: "rgba(139,92,246,0.07)" },
+    ".cm-activeLineGutter": { backgroundColor: "rgba(139,92,246,0.12)", color: "#a78bfa" },
+    ".cm-content": { caretColor: "#a78bfa" },
+    "&.cm-focused .cm-cursor": { borderLeftColor: "#a78bfa" },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
+      backgroundColor: "rgba(139,92,246,0.30)",
+    },
+  },
+  { dark: true }
+);
 
-// Берем файлы из локального хранилища
+// Возвращаем набор расширений темы для выбранного оформления
+function editorThemeFor(themeName) {
+  return themeName === "fresh-modern" ? [oneDark, freshEditorTheme] : [oneDark];
+}
+
+// Compartment позволяет менять тему редактора без пересоздания редактора
+const themeCompartment = new Compartment();
+
+// ==========================================================================
+// 3. НАСТРОЙКИ (тема, размер шрифта, панель символов) — храним в localStorage
+// ==========================================================================
+const SETTINGS_KEY = "js_editor_settings";
+const MIN_FONT = 12;
+const MAX_FONT = 26;
+const DEFAULT_SETTINGS = { theme: "vscode-dark", fontSize: 16, extraKeys: true };
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    const parsed = JSON.parse(raw);
+    const merged = { ...DEFAULT_SETTINGS, ...parsed };
+    merged.fontSize = Math.max(MIN_FONT, Math.min(MAX_FONT, Number(merged.fontSize) || DEFAULT_SETTINGS.fontSize));
+    return merged;
+  } catch (e) {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+const settings = loadSettings();
+
+function persistSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch (e) {}
+}
+
+const root = document.documentElement;
+const appEl = document.getElementById("app");
+
+// ==========================================================================
+// 4. СОЗДАНИЕ РЕДАКТОРА
+// ==========================================================================
+let currentFileName = "main.js";
 const allFiles = getAllFiles();
 const initialCode = allFiles[currentFileName] || "// Пустой файл\n";
 
-// Функция, которая срабатывает при ЛЮБОМ изменении текста в редакторе (Автосохранение!)
+// Автосохранение при любом изменении текста
 const autoSaveExtension = EditorView.updateListener.of((update) => {
   if (update.docChanged) {
-    const currentDocText = update.state.doc.toString();
-    saveFileContent(currentFileName, currentDocText);
+    saveFileContent(currentFileName, update.state.doc.toString());
   }
 });
 
-// Создаем состояние редактора с плагинами
 const state = EditorState.create({
   doc: initialCode,
   extensions: [
-    lineNumbers(),        // Включаем нумерацию строк
-    javascript(),         // Подсветка и автодополнение для JS
-    oneDark,              // Темная тема
-    customTheme,          // Применяем наши стили шрифта
-    autocompletion({ 
-      defaultKeymap: true,
-      override: [combinedCompletions] 
-    }), // Включаем автодополнение с объединёнными подсказками
-    keymap.of(defaultKeymap), // Стандартные горячие клавиши
+    lineNumbers(),
+    javascript(),
+    themeCompartment.of(editorThemeFor(settings.theme)),
+    editorFontTheme,
+    autocompletion({ defaultKeymap: true, override: [combinedCompletions] }),
+    keymap.of(defaultKeymap),
     // Tab всегда делает отступ внутри редактора (не уводит фокус на кнопки)
     keymap.of([
       { key: "Tab", run: indentMore },
-      { key: "Shift-Tab", run: indentLess }
+      { key: "Shift-Tab", run: indentLess },
     ]),
-    EditorView.lineWrapping,   // Автоперенос длинных строк (важно для мобилок)
-    autoSaveExtension // Подключаем наше автосохранение!
+    EditorView.lineWrapping,
+    autoSaveExtension,
   ],
 });
 
-// Инициализируем сам редактор в нашем HTML-контейнере
 const view = new EditorView({
   state,
   parent: document.getElementById("editor-container"),
 });
 
-// --- ЛОГИКА ИНТЕРФЕЙСА ФАЙЛОВ ---
+// ==========================================================================
+// 5. ПРИМЕНЕНИЕ НАСТРОЕК
+// ==========================================================================
+const settingsDialog = document.getElementById("settings-dialog");
+const settingsBtn = document.getElementById("settings-btn");
+const settingsCloseBtn = document.getElementById("settings-close-btn");
+const themeSegmented = document.getElementById("theme-segmented");
+const fontDecreaseBtn = document.getElementById("font-decrease");
+const fontIncreaseBtn = document.getElementById("font-increase");
+const fontSizeValue = document.getElementById("font-size-value");
+const extraKeysToggle = document.getElementById("extrakeys-toggle");
 
+function syncSettingsUI() {
+  themeSegmented.querySelectorAll(".segmented-btn").forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.themeValue === settings.theme);
+  });
+  fontSizeValue.textContent = settings.fontSize + "px";
+  fontDecreaseBtn.disabled = settings.fontSize <= MIN_FONT;
+  fontIncreaseBtn.disabled = settings.fontSize >= MAX_FONT;
+  extraKeysToggle.setAttribute("aria-checked", String(settings.extraKeys));
+}
+
+function applySettings() {
+  // Тема всей страницы (CSS-переменные)
+  root.setAttribute("data-theme", settings.theme);
+  // Размер шрифта редактора
+  root.style.setProperty("--editor-font-size", settings.fontSize + "px");
+  // Панель быстрых символов
+  appEl.classList.toggle("no-extra-keys", !settings.extraKeys);
+  // Цвет браузерной строки
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", settings.theme === "fresh-modern" ? "#0e1016" : "#1e1e1e");
+  // Тема самого редактора
+  view.dispatch({ effects: themeCompartment.reconfigure(editorThemeFor(settings.theme)) });
+
+  syncSettingsUI();
+}
+
+settingsBtn.addEventListener("click", () => {
+  syncSettingsUI();
+  settingsDialog.showModal();
+});
+settingsCloseBtn.addEventListener("click", () => settingsDialog.close());
+
+themeSegmented.addEventListener("click", (e) => {
+  const btn = e.target.closest(".segmented-btn");
+  if (!btn) return;
+  settings.theme = btn.dataset.themeValue;
+  persistSettings();
+  applySettings();
+});
+
+function changeFontSize(delta) {
+  settings.fontSize = Math.max(MIN_FONT, Math.min(MAX_FONT, settings.fontSize + delta));
+  persistSettings();
+  applySettings();
+}
+fontDecreaseBtn.addEventListener("click", () => changeFontSize(-1));
+fontIncreaseBtn.addEventListener("click", () => changeFontSize(1));
+
+extraKeysToggle.addEventListener("click", () => {
+  settings.extraKeys = !settings.extraKeys;
+  persistSettings();
+  applySettings();
+});
+
+// ==========================================================================
+// 6. СПИСОК ФАЙЛОВ
+// ==========================================================================
 const filesListContainer = document.getElementById("files-list");
 const addFileBtn = document.getElementById("add-file-btn");
+const currentFileNameEl = document.getElementById("current-file-name");
 
-// Функция для рендеринга списка файлов в сайдбаре
+const TRASH_SVG =
+  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+
 function renderFilesList() {
   filesListContainer.innerHTML = "";
   const files = getAllFiles();
 
-  Object.keys(files).forEach(fileName => {
+  Object.keys(files).forEach((fileName) => {
     const fileRow = document.createElement("div");
     fileRow.className = "file-row";
-    
-    // Подсвечиваем активный файл
     if (fileName === currentFileName) {
       fileRow.classList.add("file-row--active");
+      fileRow.setAttribute("aria-current", "true");
     }
 
-    // Название файла (клик по нему переключает файл)
     const nameSpan = document.createElement("span");
     nameSpan.className = "file-name";
     nameSpan.textContent = fileName;
-    nameSpan.addEventListener("click", () => switchFile(fileName));
     fileRow.appendChild(nameSpan);
 
-    // Кнопка удаления файла (крестик)
+    // Клик по строке переключает файл
+    fileRow.addEventListener("click", () => switchFile(fileName));
+
+    // Кнопка удаления (нельзя удалить main.js)
     if (fileName !== "main.js") {
-      const delBtn = document.createElement("span");
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
       delBtn.className = "file-delete-btn";
-      delBtn.textContent = "×";
-      
+      delBtn.setAttribute("aria-label", `Удалить ${fileName}`);
+      delBtn.innerHTML = TRASH_SVG;
       delBtn.addEventListener("click", (e) => {
-        e.stopPropagation(); // Чтобы не сработало переключение файла
-        
-        // Вызываем наше кастомное окно удаления
+        e.stopPropagation(); // не переключаем файл
         openDeleteDialog(fileName);
       });
       fileRow.appendChild(delBtn);
@@ -145,221 +263,370 @@ function renderFilesList() {
   });
 }
 
-// Функция переключения между файлами
 function switchFile(fileName) {
   currentFileName = fileName;
   const files = getAllFiles();
   const fileContent = files[fileName] || "";
 
-  // Обновляем текст внутри редактора безопасным путем через dispatch
   view.dispatch({
-    changes: { from: 0, to: view.state.doc.length, insert: fileContent }
+    changes: { from: 0, to: view.state.doc.length, insert: fileContent },
   });
 
+  if (currentFileNameEl) currentFileNameEl.textContent = fileName;
   renderFilesList();
+  closeSidebar(); // на мобильном прячем ящик после выбора файла
 }
 
-// Находим новые элементы диалогового окна
-const fileDialog = document.getElementById("file-dialog");
-const fileNameInput = document.getElementById("new-file-name-input");
-const dialogCancelBtn = document.getElementById("dialog-cancel-btn");
-const dialogSaveBtn = document.getElementById("dialog-save-btn");
-// Находим элемент текста ошибки в диалоге
-const dialogErrorMsg = document.getElementById("dialog-error-msg");
+// ==========================================================================
+// 7. САЙДБАР: выдвижной ящик (мобильные) / сворачивание (десктоп)
+// ==========================================================================
+const menuBtn = document.getElementById("menu-btn");
+const sidebarBackdrop = document.getElementById("sidebar-backdrop");
+const mobileQuery = window.matchMedia("(max-width: 767px)");
 
-// 1. Открытие окна при клике на "+ Новый файл"
-addFileBtn.addEventListener("click", () => {
-  fileNameInput.value = ""; // Очищаем поле перед открытием
-  dialogErrorMsg.style.display = "none"; // Скрываем прошлую ошибку при новом открытии
-  dialogErrorMsg.textContent = "";
-  fileDialog.showModal();   // Метод showModal() открывает окно как полноценный попап с затемнением заднего фона
-  fileNameInput.focus();    // Сразу фокусируемся на инпуте (на ПК поднимет фокус, на мобилке может вызвать клавиатуру)
+function toggleSidebar() {
+  if (mobileQuery.matches) {
+    appEl.classList.toggle("sidebar-open");
+  } else {
+    appEl.classList.toggle("sidebar-collapsed");
+  }
+}
+function closeSidebar() {
+  if (mobileQuery.matches) appEl.classList.remove("sidebar-open");
+}
+
+menuBtn.addEventListener("click", toggleSidebar);
+sidebarBackdrop.addEventListener("click", closeSidebar);
+
+// ==========================================================================
+// 8. КОНСОЛЬ: шторка (мобильные) + изменение высоты + счётчик новых строк
+// ==========================================================================
+const mainCol = document.getElementById("main-col");
+const consolePane = document.getElementById("console-pane");
+const consoleHandle = document.getElementById("console-handle");
+const consoleToggleBtn = document.getElementById("console-toggle-btn");
+const consoleCloseBtn = document.getElementById("console-close-btn");
+const consoleBadge = document.getElementById("console-badge");
+let unreadCount = 0;
+
+function setConsoleOpen(open) {
+  if (!mobileQuery.matches) return; // на десктопе консоль всегда видна
+  mainCol.classList.toggle("console-open", open);
+  consoleToggleBtn.setAttribute("aria-pressed", String(open));
+  if (open) resetBadge();
+}
+function toggleConsole() {
+  setConsoleOpen(!mainCol.classList.contains("console-open"));
+}
+function bumpBadge() {
+  if (mobileQuery.matches && !mainCol.classList.contains("console-open")) {
+    unreadCount++;
+    consoleBadge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+    consoleBadge.classList.remove("is-hidden");
+  }
+}
+function resetBadge() {
+  unreadCount = 0;
+  consoleBadge.textContent = "0";
+  consoleBadge.classList.add("is-hidden");
+}
+
+consoleToggleBtn.addEventListener("click", toggleConsole);
+consoleCloseBtn.addEventListener("click", () => setConsoleOpen(false));
+
+// Перетаскивание границы консоли (работает и на ПК, и на телефоне)
+let resizing = false;
+let resizeStartY = 0;
+let resizeStartH = 0;
+
+consoleHandle.addEventListener("pointerdown", (e) => {
+  resizing = true;
+  resizeStartY = e.clientY;
+  resizeStartH = consolePane.getBoundingClientRect().height;
+  consoleHandle.setPointerCapture(e.pointerId);
+  document.body.classList.add("is-resizing");
+  e.preventDefault();
 });
-
-// 2. Закрытие окна при клике на "Отмена"
-dialogCancelBtn.addEventListener("click", () => {
-  fileDialog.close();       // Закрываем окно
+consoleHandle.addEventListener("pointermove", (e) => {
+  if (!resizing) return;
+  const dy = resizeStartY - e.clientY; // тянем вверх — консоль растёт
+  const parentH = mainCol.clientHeight || window.innerHeight;
+  const minH = 90;
+  const maxH = Math.max(minH + 10, parentH * 0.9);
+  const nextH = Math.max(minH, Math.min(maxH, resizeStartH + dy));
+  root.style.setProperty("--console-height", nextH + "px");
 });
+function endResize(e) {
+  if (!resizing) return;
+  resizing = false;
+  document.body.classList.remove("is-resizing");
+  try {
+    consoleHandle.releasePointerCapture(e.pointerId);
+  } catch (err) {}
+}
+consoleHandle.addEventListener("pointerup", endResize);
+consoleHandle.addEventListener("pointercancel", endResize);
 
-// 3. Логика сохранения файла по кнопке "Создать"
-function handleCreateFile() {
-  const nameWithoutExtension = fileNameInput.value.trim();
-  
-  // Валидация на пустое поле через текст в попапе
-  if (!nameWithoutExtension) {
-    dialogErrorMsg.textContent = "Имя файла не может быть пустым!";
-    dialogErrorMsg.style.display = "block";
+// ==========================================================================
+// 9. ПАНЕЛЬ БЫСТРЫХ СИМВОЛОВ (вставка в редактор без потери фокуса)
+// ==========================================================================
+const extraKeys = document.getElementById("extra-keys");
+
+function insertText(text) {
+  const { from, to } = view.state.selection.main;
+  view.dispatch({
+    changes: { from, to, insert: text },
+    selection: { anchor: from + text.length },
+    scrollIntoView: true,
+  });
+  view.focus();
+}
+function insertPair(open, close) {
+  const { from, to } = view.state.selection.main;
+  const selected = view.state.sliceDoc(from, to);
+  if (selected.length > 0) {
+    view.dispatch({
+      changes: { from, to, insert: open + selected + close },
+      selection: { anchor: from + open.length, head: from + open.length + selected.length },
+      scrollIntoView: true,
+    });
+  } else {
+    view.dispatch({
+      changes: { from, insert: open + close },
+      selection: { anchor: from + open.length },
+      scrollIntoView: true,
+    });
+  }
+  view.focus();
+}
+
+// Не даём кнопкам украсть фокус у редактора (важно на ПК, помогает на мобильном)
+extraKeys.addEventListener("mousedown", (e) => {
+  if (e.target.closest("button")) e.preventDefault();
+});
+extraKeys.addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+
+  if (btn.dataset.key === "tab") {
+    indentMore(view);
+    view.focus();
     return;
   }
-
-  // Автоматически приклеиваем .js к введённому имени
-  const fullFileName = `${nameWithoutExtension}.js`;
-
-  if (createNewFile(fullFileName)) {
-    switchFile(fullFileName);
-    fileDialog.close(); // Закрываем окно после успешного создания
-  } else {
-    // Валидация на дубликат через текст в попапе
-    dialogErrorMsg.textContent = "Файл с таким именем уже существует!";
-    dialogErrorMsg.style.display = "block";
+  const pair = btn.dataset.pair;
+  if (pair) {
+    insertPair(pair[0], pair[pair.length - 1]);
+    return;
   }
-}
-
-// Срабатывает при клике на синюю кнопку в попапе
-dialogSaveBtn.addEventListener("click", handleCreateFile);
-
-// Удобство: создание файла по нажатию клавиши Enter внутри инпута
-fileNameInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-     e.preventDefault();
-    handleCreateFile();
+  if (btn.dataset.insert != null) {
+    insertText(btn.dataset.insert);
   }
 });
 
-// Инициализируем список файлов при первой загрузке приложения
-renderFilesList();
-
- // Логика кнопки "Запустить код" с перехватом консоли
-  const runBtn = document.getElementById("run-btn");
-  const consoleOutput = document.getElementById("console-output");
-
-// --- УПРАВЛЕНИЕ ЗАПУСКОМ КОДА И КОНСОЛЬЮ ---
+// ==========================================================================
+// 10. ЗАПУСК КОДА (Web Worker) И ВЫВОД В КОНСОЛЬ
+// ==========================================================================
+const runBtn = document.getElementById("run-btn");
+const runBtnLabel = document.getElementById("run-btn-label");
 const stopBtn = document.getElementById("stop-btn");
+const consoleOutput = document.getElementById("console-output");
 const clearConsoleBtn = document.getElementById("clear-console-btn");
+let currentWorker = null;
 
-let currentWorker = null; // Переменная для хранения активного фонового потока
-
-// 1. Кнопка «Очистить консоль»
-if (clearConsoleBtn && consoleOutput) {
-  clearConsoleBtn.addEventListener("click", () => {
-    consoleOutput.innerHTML = "";
-  });
+function setRunningUI(running) {
+  stopBtn.classList.toggle("is-hidden", !running);
+  runBtn.classList.toggle("is-running", running);
+  runBtnLabel.textContent = running ? "Выполняется…" : "Запустить";
 }
 
-// 2. Функция для вывода логов на экран (мы её немного упростили, так как типы приходят из воркера)
 function printToScreenConsole(type, args) {
-  const message = args.map(arg => {
-    if (typeof arg === 'object' && arg !== null) return JSON.stringify(arg, null, 2);
-    return String(arg);
-  }).join(' ');
+  const message = args
+    .map((arg) => {
+      if (typeof arg === "object" && arg !== null) {
+        try {
+          return JSON.stringify(arg, null, 2);
+        } catch (e) {
+          return String(arg);
+        }
+      }
+      return String(arg);
+    })
+    .join(" ");
 
   const logLine = document.createElement("div");
   logLine.className = "log-line";
   logLine.textContent = `> ${message}`;
 
-  if (type === 'warn') {
-    logLine.classList.add("log-line--warn");
-  } else if (type === 'error') {
-    logLine.classList.add("log-line--error");
-  } else if (type === 'info') {
-    logLine.classList.add("log-line--info");
-  }
+  if (type === "warn") logLine.classList.add("log-line--warn");
+  else if (type === "error") logLine.classList.add("log-line--error");
+  else if (type === "info") logLine.classList.add("log-line--info");
 
   consoleOutput.appendChild(logLine);
-  consoleOutput.scrollTop = consoleOutput.scrollHeight; // Автоскролл консоли вниз
+  consoleOutput.scrollTop = consoleOutput.scrollHeight;
+  bumpBadge();
 }
 
-// 3. Функция остановки зависшего кода
 function stopExecution() {
+  if (!currentWorker) return;
+  currentWorker.terminate(); // жёстко убиваем поток с бесконечным циклом
+  currentWorker = null;
+  printToScreenConsole("warn", ["Выполнение кода принудительно остановлено."]);
+  setRunningUI(false);
+}
+
+clearConsoleBtn.addEventListener("click", () => {
+  consoleOutput.innerHTML = "";
+  resetBadge();
+});
+stopBtn.addEventListener("click", stopExecution);
+
+runBtn.addEventListener("click", () => {
+  // Повторный клик по "Запустить" во время выполнения = Стоп
   if (currentWorker) {
-    currentWorker.terminate(); // Жестко убиваем фоновый поток с бесконечным циклом
-    currentWorker = null;
-    
-    printToScreenConsole('warn', ['Выполнение кода принудительно остановлено пользователем.']);
-    
-    // Меняем состояние кнопок назад
-    stopBtn.style.display = "none";
-    runBtn.textContent = "▶ Запустить код";
+    stopExecution();
+    return;
+  }
+
+  const codeToRun = view.state.doc.toString();
+  consoleOutput.innerHTML = "";
+  resetBadge();
+  setConsoleOpen(true); // на мобильном сразу показываем результат
+  setRunningUI(true);
+
+  currentWorker = new Worker(new URL("./eval-worker.js", import.meta.url), { type: "module" });
+
+  currentWorker.onmessage = function (e) {
+    const data = e.data;
+    if (data.type === "console") {
+      printToScreenConsole(data.method, data.args);
+    } else if (data.type === "success") {
+      setRunningUI(false);
+      currentWorker = null;
+    } else if (data.type === "error") {
+      printToScreenConsole("error", [`[Ошибка]: ${data.message}`]);
+      setRunningUI(false);
+      currentWorker = null;
+    }
+  };
+
+  currentWorker.postMessage({ code: codeToRun });
+});
+
+// ==========================================================================
+// 11. ДИАЛОГ: СОЗДАНИЕ ФАЙЛА
+// ==========================================================================
+const fileDialog = document.getElementById("file-dialog");
+const fileNameInput = document.getElementById("new-file-name-input");
+const dialogCancelBtn = document.getElementById("dialog-cancel-btn");
+const dialogSaveBtn = document.getElementById("dialog-save-btn");
+const dialogErrorMsg = document.getElementById("dialog-error-msg");
+
+function showFileError(msg) {
+  dialogErrorMsg.textContent = msg;
+  dialogErrorMsg.classList.add("is-visible");
+}
+function hideFileError() {
+  dialogErrorMsg.textContent = "";
+  dialogErrorMsg.classList.remove("is-visible");
+}
+
+addFileBtn.addEventListener("click", () => {
+  fileNameInput.value = "";
+  hideFileError();
+  fileDialog.showModal();
+  fileNameInput.focus();
+});
+
+dialogCancelBtn.addEventListener("click", () => fileDialog.close());
+
+function handleCreateFile() {
+  const nameWithoutExtension = fileNameInput.value.trim();
+
+  if (!nameWithoutExtension) {
+    showFileError("Имя файла не может быть пустым!");
+    return;
+  }
+
+  const fullFileName = `${nameWithoutExtension}.js`;
+  if (createNewFile(fullFileName)) {
+    switchFile(fullFileName);
+    fileDialog.close();
+  } else {
+    showFileError("Файл с таким именем уже существует!");
   }
 }
 
-// Привязываем клик по кнопке «Стоп»
-if (stopBtn) {
-  stopBtn.addEventListener("click", stopExecution);
-}
+dialogSaveBtn.addEventListener("click", handleCreateFile);
+fileNameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    handleCreateFile();
+  }
+});
 
-// 4. Логика кнопки «Запустить код» через Web Worker
-if (runBtn && consoleOutput) {
-  runBtn.addEventListener("click", () => {
-    // Если код уже запущен, повторный клик сработает как Стоп
-    if (currentWorker) {
-      stopExecution();
-      return;
-    }
-
-    const codeToRun = view.state.doc.toString();
-    consoleOutput.innerHTML = ""; // Очищаем консоль
-
-    // Показываем кнопку Стоп и меняем текст кнопки Запуск
-    stopBtn.style.display = "block";
-    runBtn.textContent = "⌛ Выполняется...";
-
-    // Инициализируем новый фоновый Worker через специальный синтаксис Vite
-    currentWorker = new Worker(new URL('./eval-worker.js', import.meta.url), { type: 'module' });
-
-    // Слушаем ответы от фонового потока
-    currentWorker.onmessage = function (e) {
-      const data = e.data;
-
-      if (data.type === 'console') {
-        // Если воркер прислал лог — выводим на экран
-        printToScreenConsole(data.method, data.args);
-      } 
-      else if (data.type === 'success') {
-        // Код выполнился (воркер сам закрылся, т.к. нет активных таймеров)
-        stopBtn.style.display = "none";
-        runBtn.textContent = "▶ Запустить код";
-        currentWorker = null;
-      } 
-      else if (data.type === 'error') {
-        // Произошла ошибка во время выполнения кода
-        printToScreenConsole('error', [`[Ошибка]: ${data.message}`]);
-        stopBtn.style.display = "none";
-        runBtn.textContent = "▶ Запустить код";
-        currentWorker = null;
-      }
-    };
-
-    // Запускаем код! Отправляем строку с кодом в воркер
-    currentWorker.postMessage({ code: codeToRun });
-  });
-}
-
-
-  // --- ЛОГИКА ОКНА УДАЛЕНИЯ ---
+// ==========================================================================
+// 12. ДИАЛОГ: УДАЛЕНИЕ ФАЙЛА
+// ==========================================================================
 const deleteDialog = document.getElementById("delete-dialog");
 const deleteDialogText = document.getElementById("delete-dialog-text");
 const deleteCancelBtn = document.getElementById("delete-cancel-btn");
 const deleteConfirmBtn = document.getElementById("delete-confirm-btn");
+let fileToDelete = "";
 
-let fileToDelete = ""; // Переменная для хранения имени файла, выбранного для удаления
-
-// Функция открытия окна удаления
 function openDeleteDialog(fileName) {
   fileToDelete = fileName;
   deleteDialogText.textContent = `Вы действительно хотите удалить файл ${fileName}? Восстановить его будет невозможно.`;
   deleteDialog.showModal();
 }
 
-// Клик по кнопке "Отмена" в окне удаления
 deleteCancelBtn.addEventListener("click", () => {
   deleteDialog.close();
-  fileToDelete = ""; // Очищаем ссылку
+  fileToDelete = "";
 });
 
-// Клик по кнопке "Удалить" (финальное удаление)
 deleteConfirmBtn.addEventListener("click", () => {
-  if (fileToDelete) {
-    deleteFile(fileToDelete);
-    
-    // Если мы удалили тот файл, который прямо сейчас открыт — переключаем на main.js
-    if (currentFileName === fileToDelete) {
-      switchFile("main.js");
-    } else {
-      renderFilesList(); // Иначе просто обновляем список в сайдбаре
-    }
-    
-    deleteDialog.close();
-    fileToDelete = "";
+  if (!fileToDelete) return;
+  deleteFile(fileToDelete);
+  if (currentFileName === fileToDelete) {
+    switchFile("main.js");
+  } else {
+    renderFilesList();
+  }
+  deleteDialog.close();
+  fileToDelete = "";
+});
+
+// ==========================================================================
+// 13. КЛАВИАТУРА: подъём интерфейса над виртуальной клавиатурой (iOS)
+// ==========================================================================
+function setupKeyboardInset() {
+  if (!window.visualViewport) return;
+  const vv = window.visualViewport;
+  const update = () => {
+    const inset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    root.style.setProperty("--kb-inset", inset + "px");
+  };
+  vv.addEventListener("resize", update);
+  vv.addEventListener("scroll", update);
+  window.addEventListener("resize", update);
+  update();
+}
+
+// ==========================================================================
+// 14. ГОРЯЧАЯ КЛАВИША: Ctrl/Cmd + Enter — запуск кода
+// ==========================================================================
+window.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    e.preventDefault();
+    runBtn.click();
   }
 });
+
+// ==========================================================================
+// 15. ИНИЦИАЛИЗАЦИЯ
+// ==========================================================================
+applySettings();
+renderFilesList();
+if (currentFileNameEl) currentFileNameEl.textContent = currentFileName;
+setRunningUI(false);
+setupKeyboardInset();
