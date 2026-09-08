@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/js-mxmp-editor/sw.js', { scope: '/js-mxmp-editor/' })})}

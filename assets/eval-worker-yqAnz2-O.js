@@ -1,1 +1,0 @@
-(function(){self.onmessage=function(e){const{code}=e.data,methods=[`log`,`warn`,`error`,`info`];methods.forEach(t=>{console[t]=function(...n){self.postMessage({type:`console`,method:t,args:n})}});try{eval(code),self.postMessage({type:`success`})}catch(t){self.postMessage({type:`error`,message:t.message})}}})();
